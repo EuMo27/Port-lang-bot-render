@@ -436,94 +436,105 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text('✋ Операция отменена.')
     return ConversationHandler.END
 
+async def setup_application(db_pool=None):
+    # Создаём приложение
+    application = ApplicationBuilder().token(TOKEN).build()
+
+    # Сохраняем пул в bot_data, если он есть
+    if db_pool:
+        application.bot_data['db_pool'] = db_pool
+
+    # Добавляем обработчики
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_command))
+
+    if db_pool:
+        application.add_handler(CommandHandler("thesaurus", thesaurus))
+        application.add_handler(CommandHandler("stats", stats))
+        application.add_handler(CommandHandler("memory", memory))
+        application.add_handler(CommandHandler("delete", delete))
+
+        add_handler = ConversationHandler(
+            entry_points=[CommandHandler('add', add)],
+            states={
+                PORTUGUESE: [MessageHandler(filters.ALL & ~filters.COMMAND, get_portuguese)],
+                RUSSIAN: [MessageHandler(filters.ALL & ~filters.COMMAND, get_russian)],
+            },
+            fallbacks=[CommandHandler('cancel', cancel)]
+        )
+        application.add_handler(add_handler)
+
+        bulk_handler = ConversationHandler(
+            entry_points=[CommandHandler('bulk_add', bulk_add)],
+            states={
+                BULK_ADD: [MessageHandler(filters.ALL & ~filters.COMMAND | filters.Document.ALL, process_bulk_add)]
+            },
+            fallbacks=[CommandHandler('cancel', cancel)]
+        )
+        application.add_handler(bulk_handler)
+
+        edit_handler = ConversationHandler(
+            entry_points=[CommandHandler('edit', edit)],
+            states={
+                EDIT_PORTUGUESE: [MessageHandler(filters.ALL & ~filters.COMMAND, edit_portuguese)],
+                EDIT_RUSSIAN: [MessageHandler(filters.ALL & ~filters.COMMAND, edit_russian)],
+            },
+            fallbacks=[CommandHandler('cancel', cancel)]
+        )
+        application.add_handler(edit_handler)
+
+        test_handler = ConversationHandler(
+            entry_points=[CommandHandler('test', test)],
+            states={
+                TEST_ANSWER: [MessageHandler(filters.ALL & ~filters.COMMAND, check_answer)]
+            },
+            fallbacks=[CommandHandler('cancel', cancel)]
+        )
+        application.add_handler(test_handler)
+
+    return application
+
 async def main():
     if not TOKEN:
         print("Error: TOKEN is not set!")
         return
 
-    while True:
-        # Используем пул как контекстный менеджер
-        if DATABASE_URL:
-            async with AsyncConnectionPool(DATABASE_URL, min_size=1, max_size=20) as db_pool:
-                print("Database pool created successfully!")
-                await init_db(db_pool)
+    # Создаём пул соединений один раз
+    db_pool = None
+    if DATABASE_URL:
+        try:
+            db_pool = AsyncConnectionPool(DATABASE_URL, min_size=1, max_size=20)
+            await db_pool.wait()  # Ожидаем, пока пул будет готов
+            print("Database pool created successfully!")
+            await init_db(db_pool)
+        except Exception as e:
+            print(f"Failed to create database pool: {e}")
+            return
 
-                # Создаём новое приложение для каждого запуска
-                application = ApplicationBuilder().token(TOKEN).build()
-
-                # Сохраняем пул в bot_data
-                application.bot_data['db_pool'] = db_pool
-
-                # Добавляем обработчики
-                application.add_handler(CommandHandler("start", start))
-                application.add_handler(CommandHandler("help", help_command))
-                application.add_handler(CommandHandler("thesaurus", thesaurus))
-                application.add_handler(CommandHandler("stats", stats))
-                application.add_handler(CommandHandler("memory", memory))
-                application.add_handler(CommandHandler("delete", delete))
-
-                add_handler = ConversationHandler(
-                    entry_points=[CommandHandler('add', add)],
-                    states={
-                        PORTUGUESE: [MessageHandler(filters.ALL & ~filters.COMMAND, get_portuguese)],
-                        RUSSIAN: [MessageHandler(filters.ALL & ~filters.COMMAND, get_russian)],
-                    },
-                    fallbacks=[CommandHandler('cancel', cancel)]
-                )
-                application.add_handler(add_handler)
-
-                bulk_handler = ConversationHandler(
-                    entry_points=[CommandHandler('bulk_add', bulk_add)],
-                    states={
-                        BULK_ADD: [MessageHandler(filters.ALL & ~filters.COMMAND | filters.Document.ALL, process_bulk_add)]
-                    },
-                    fallbacks=[CommandHandler('cancel', cancel)]
-                )
-                application.add_handler(bulk_handler)
-
-                edit_handler = ConversationHandler(
-                    entry_points=[CommandHandler('edit', edit)],
-                    states={
-                        EDIT_PORTUGUESE: [MessageHandler(filters.ALL & ~filters.COMMAND, edit_portuguese)],
-                        EDIT_RUSSIAN: [MessageHandler(filters.ALL & ~filters.COMMAND, edit_russian)],
-                    },
-                    fallbacks=[CommandHandler('cancel', cancel)]
-                )
-                application.add_handler(edit_handler)
-
-                test_handler = ConversationHandler(
-                    entry_points=[CommandHandler('test', test)],
-                    states={
-                        TEST_ANSWER: [MessageHandler(filters.ALL & ~filters.COMMAND, check_answer)]
-                    },
-                    fallbacks=[CommandHandler('cancel', cancel)]
-                )
-                application.add_handler(test_handler)
-
-                try:
-                    await application.initialize()  # Инициализируем приложение
-                    await application.run_polling(allowed_updates=Update.ALL_TYPES)
-                except Exception as e:
-                    print(f"Bot crashed with error: {e}, restarting...")
-                    await application.shutdown()  # Завершаем приложение перед перезапуском
-                    await asyncio.sleep(5)
-                else:
-                    await application.shutdown()  # Завершаем приложение при нормальном выходе
-        else:
-            print("No DATABASE_URL provided, running without database.")
-            application = ApplicationBuilder().token(TOKEN).build()
-            application.add_handler(CommandHandler("start", start))
-            application.add_handler(CommandHandler("help", help_command))
+    try:
+        while True:
+            # Создаём приложение
+            application = await setup_application(db_pool)
 
             try:
-                await application.initialize()  # Инициализируем приложение
+                # Инициализируем приложение
+                await application.initialize()
+                # Запускаем polling
                 await application.run_polling(allowed_updates=Update.ALL_TYPES)
             except Exception as e:
                 print(f"Bot crashed with error: {e}, restarting...")
-                await application.shutdown()  # Завершаем приложение перед перезапуском
-                await asyncio.sleep(5)
-            else:
-                await application.shutdown()  # Завершаем приложение при нормальном выходе
+            finally:
+                # Всегда завершаем приложение
+                await application.shutdown()
+
+            # Ждём перед перезапуском
+            await asyncio.sleep(5)
+
+    finally:
+        # Закрываем пул соединений при завершении программы
+        if db_pool:
+            await db_pool.close()
+            print("Database pool closed.")
 
 if __name__ == '__main__':
     asyncio.run(main())

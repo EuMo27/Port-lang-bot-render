@@ -441,14 +441,16 @@ async def main():
         print("Error: TOKEN is not set!")
         return
 
+    application = ApplicationBuilder().token(TOKEN).build()
+
     # Создание пула как контекстного менеджера
     if DATABASE_URL:
         try:
             async with AsyncConnectionPool(DATABASE_URL, min_size=1, max_size=20) as pool:
-                context.bot_data['db_pool'] = pool
+                # Сохраняем пул в bot_data через application
+                application.bot_data['db_pool'] = pool
                 print("Database pool created successfully!")
                 await init_db(pool)
-                application = ApplicationBuilder().token(TOKEN).build()
 
                 application.add_handler(CommandHandler("start", start))
                 application.add_handler(CommandHandler("help", help_command))
@@ -505,8 +507,6 @@ async def main():
             print(f"Failed to create database pool: {e}")
     else:
         print("No DATABASE_URL provided, running without database.")
-        application = ApplicationBuilder().token(TOKEN).build()
-
         application.add_handler(CommandHandler("start", start))
         application.add_handler(CommandHandler("help", help_command))
 

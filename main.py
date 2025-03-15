@@ -9,17 +9,8 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Con
 TOKEN = os.getenv("TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Создаём пул соединений для PostgreSQL
+# Переменная для пула соединений (инициализируем позже)
 db_pool = None
-if DATABASE_URL:
-    try:
-        db_pool = AsyncConnectionPool(DATABASE_URL, min_size=1, max_size=20)
-        print("Database pool created successfully!")
-    except Exception as e:
-        print(f"Failed to create database pool: {e}")
-        db_pool = None
-else:
-    print("No DATABASE_URL provided, running without database.")
 
 # Состояния для ConversationHandler
 PORTUGUESE, RUSSIAN, TEST_ANSWER, BULK_ADD, EDIT_PORTUGUESE, EDIT_RUSSIAN = range(6)
@@ -451,9 +442,22 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return ConversationHandler.END
 
 async def main():
+    global db_pool  # Объявляем db_pool как глобальную переменную, чтобы изменить её
+
     if not TOKEN:
         print("Error: TOKEN is not set!")
         return
+
+    # Создаём пул соединений внутри асинхронной функции
+    if DATABASE_URL:
+        try:
+            db_pool = AsyncConnectionPool(DATABASE_URL, min_size=1, max_size=20)
+            print("Database pool created successfully!")
+        except Exception as e:
+            print(f"Failed to create database pool: {e}")
+            db_pool = None
+    else:
+        print("No DATABASE_URL provided, running without database.")
 
     if db_pool:
         await init_db()
@@ -470,8 +474,8 @@ async def main():
     add_handler = ConversationHandler(
         entry_points=[CommandHandler('add', add)],
         states={
-            PORTUGUESE: [MessageHandler(filters.Text() & ~filters.Command(), get_portuguese)],
-            RUSSIAN: [MessageHandler(filters.Text() & ~filters.Command(), get_russian)],
+            PORTUGUESE: [MessageHandler(filters.Text & ~filters.Command, get_portuguese)],
+            RUSSIAN: [MessageHandler(filters.Text & ~filters.Command, get_russian)],
         },
         fallbacks=[CommandHandler('cancel', cancel)]
     )
@@ -480,7 +484,7 @@ async def main():
     bulk_handler = ConversationHandler(
         entry_points=[CommandHandler('bulk_add', bulk_add)],
         states={
-            BULK_ADD: [MessageHandler(filters.Text() & ~filters.Command() | filters.Document.ALL(), process_bulk_add)]
+            BULK_ADD: [MessageHandler(filters.Text & ~filters.Command | filters.Document.ALL, process_bulk_add)]
         },
         fallbacks=[CommandHandler('cancel', cancel)]
     )
@@ -489,8 +493,8 @@ async def main():
     edit_handler = ConversationHandler(
         entry_points=[CommandHandler('edit', edit)],
         states={
-            EDIT_PORTUGUESE: [MessageHandler(filters.Text() & ~filters.Command(), edit_portuguese)],
-            EDIT_RUSSIAN: [MessageHandler(filters.Text() & ~filters.Command(), edit_russian)],
+            EDIT_PORTUGUESE: [MessageHandler(filters.Text & ~filters.Command, edit_portuguese)],
+            EDIT_RUSSIAN: [MessageHandler(filters.Text & ~filters.Command, edit_russian)],
         },
         fallbacks=[CommandHandler('cancel', cancel)]
     )
@@ -499,7 +503,7 @@ async def main():
     test_handler = ConversationHandler(
         entry_points=[CommandHandler('test', test)],
         states={
-            TEST_ANSWER: [MessageHandler(filters.Text() & ~filters.Command(), check_answer)]
+            TEST_ANSWER: [MessageHandler(filters.Text & ~filters.Command, check_answer)]
         },
         fallbacks=[CommandHandler('cancel', cancel)]
     )

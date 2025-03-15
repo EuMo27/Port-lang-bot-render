@@ -1,4 +1,4 @@
-from psycopg_pool import ConnectionPool
+from psycopg_pool import AsyncConnectionPool
 import random
 import os
 import asyncio
@@ -13,7 +13,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 db_pool = None
 if DATABASE_URL:
     try:
-        db_pool = ConnectionPool(DATABASE_URL, min_size=1, max_size=20)
+        db_pool = AsyncConnectionPool(DATABASE_URL, min_size=1, max_size=20)
         print("Database pool created successfully!")
     except Exception as e:
         print(f"Failed to create database pool: {e}")
@@ -66,10 +66,10 @@ async def thesaurus(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("❌ База данных не подключена!")
         return
 
-    with db_pool.connection() as conn:
-        with conn.cursor() as c:
-            c.execute("SELECT id, portuguese, russian FROM thesaurus")
-            words = c.fetchall()
+    async with db_pool.connection() as conn:
+        async with conn.cursor() as c:
+            await c.execute("SELECT id, portuguese, russian FROM thesaurus")
+            words = await c.fetchall()
 
     if not words:
         await update.message.reply_text(
@@ -98,12 +98,12 @@ async def get_russian(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     russian = update.message.text
     portuguese = context.user_data['portuguese']
 
-    with db_pool.connection() as conn:
-        with conn.cursor() as c:
-            c.execute(
+    async with db_pool.connection() as conn:
+        async with conn.cursor() as c:
+            await c.execute(
                 "INSERT INTO thesaurus (portuguese, russian) VALUES (%s, %s)",
                 (portuguese, russian))
-            conn.commit()
+            await conn.commit()
 
     await update.message.reply_text(
         f'✅ Слово *"{portuguese}"* с переводом *"{russian}"* добавлено!',
@@ -124,8 +124,8 @@ async def process_bulk_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     added = 0
     errors = 0
 
-    with db_pool.connection() as conn:
-        with conn.cursor() as c:
+    async with db_pool.connection() as conn:
+        async with conn.cursor() as c:
             try:
                 if update.message.document:
                     file = await update.message.document.get_file()
@@ -167,7 +167,7 @@ async def process_bulk_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                         try:
                             portuguese, russian = [part.strip() for part in line.split('-', 1)]
                             if portuguese and russian:
-                                c.execute(
+                                await c.execute(
                                     "INSERT INTO thesaurus (portuguese, russian) VALUES (%s, %s)",
                                     (portuguese, russian))
                                 added += 1
@@ -192,7 +192,7 @@ async def process_bulk_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                         try:
                             portuguese, russian = [part.strip() for part in line.split('-', 1)]
                             if portuguese and russian:
-                                c.execute(
+                                await c.execute(
                                     "INSERT INTO thesaurus (portuguese, russian) VALUES (%s, %s)",
                                     (portuguese, russian))
                                 added += 1
@@ -206,7 +206,7 @@ async def process_bulk_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                         response += f'\n⚠️ Пропущено строк с ошибками: {errors}'
                     await update.message.reply_text(response, parse_mode='Markdown')
 
-                conn.commit()
+                await conn.commit()
 
             except Exception as e:
                 await update.message.reply_text(f'❌ Ошибка при обработке: {str(e)}')
@@ -224,10 +224,10 @@ async def edit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         return ConversationHandler.END
 
     word_id = context.args[0]
-    with db_pool.connection() as conn:
-        with conn.cursor() as c:
-            c.execute("SELECT portuguese, russian FROM thesaurus WHERE id = %s", (word_id,))
-            word = c.fetchone()
+    async with db_pool.connection() as conn:
+        async with conn.cursor() as c:
+            await c.execute("SELECT portuguese, russian FROM thesaurus WHERE id = %s", (word_id,))
+            word = await c.fetchone()
 
     if not word:
         await update.message.reply_text(
@@ -256,12 +256,12 @@ async def edit_russian(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     new_portuguese = context.user_data['new_portuguese']
     word_id = context.user_data['edit_id']
 
-    with db_pool.connection() as conn:
-        with conn.cursor() as c:
-            c.execute(
+    async with db_pool.connection() as conn:
+        async with conn.cursor() as c:
+            await c.execute(
                 "UPDATE thesaurus SET portuguese = %s, russian = %s WHERE id = %s",
                 (new_portuguese, new_russian, word_id))
-            conn.commit()
+            await conn.commit()
 
     await update.message.reply_text(
         f'✅ Слово с ID {word_id} обновлено: *{new_portuguese} - {new_russian}*',
@@ -279,10 +279,10 @@ async def delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     word_id = context.args[0]
-    with db_pool.connection() as conn:
-        with conn.cursor() as c:
-            c.execute("SELECT portuguese, russian FROM thesaurus WHERE id = %s", (word_id,))
-            word = c.fetchone()
+    async with db_pool.connection() as conn:
+        async with conn.cursor() as c:
+            await c.execute("SELECT portuguese, russian FROM thesaurus WHERE id = %s", (word_id,))
+            word = await c.fetchone()
 
             if not word:
                 await update.message.reply_text(
@@ -290,10 +290,10 @@ async def delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                     parse_mode='Markdown')
                 return
 
-            c.execute("DELETE FROM thesaurus WHERE id = %s", (word_id,))
-            c.execute("DELETE FROM stats WHERE id = %s", (word_id,))
-            c.execute("DELETE FROM history WHERE word_id = %s", (word_id,))
-            conn.commit()
+            await c.execute("DELETE FROM thesaurus WHERE id = %s", (word_id,))
+            await c.execute("DELETE FROM stats WHERE id = %s", (word_id,))
+            await c.execute("DELETE FROM history WHERE word_id = %s", (word_id,))
+            await conn.commit()
 
     await update.message.reply_text(
         f'🗑️ Слово *{word[0]} - {word[1]}* (ID {word_id}) удалено!',
@@ -304,12 +304,12 @@ async def test(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         await update.message.reply_text("❌ База данных не подключена!")
         return ConversationHandler.END
 
-    with db_pool.connection() as conn:
-        with conn.cursor() as c:
-            c.execute(
+    async with db_pool.connection() as conn:
+        async with conn.cursor() as c:
+            await c.execute(
                 "SELECT t.id, t.portuguese, t.russian, COALESCE(s.incorrect, 0) as errors FROM thesaurus t "
                 "LEFT JOIN stats s ON t.id = s.id")
-            words = c.fetchall()
+            words = await c.fetchall()
 
     if not words:
         await update.message.reply_text(
@@ -351,9 +351,9 @@ async def check_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     correct_answer = context.user_data['correct_answer']
     word_id = context.user_data['current_word_id']
 
-    with db_pool.connection() as conn:
-        with conn.cursor() as c:
-            c.execute(
+    async with db_pool.connection() as conn:
+        async with conn.cursor() as c:
+            await c.execute(
                 "INSERT INTO stats (id) VALUES (%s) ON CONFLICT (id) DO NOTHING",
                 (word_id,))
             is_correct = user_answer.lower() == correct_answer.lower()
@@ -361,24 +361,24 @@ async def check_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             if is_correct:
                 await update.message.reply_text('✅ *Перевод правильный!*',
                                                 parse_mode='Markdown')
-                c.execute(
+                await c.execute(
                     "UPDATE stats SET correct = correct + 1 WHERE id = %s",
                     (word_id,))
-                c.execute(
+                await c.execute(
                     "INSERT INTO history (word_id, correct) VALUES (%s, 1)",
                     (word_id,))
             else:
                 await update.message.reply_text(
                     f'❌ *Ошибка!* Правильный ответ: *"{correct_answer}"*',
                     parse_mode='Markdown')
-                c.execute(
+                await c.execute(
                     "UPDATE stats SET incorrect = incorrect + 1 WHERE id = %s",
                     (word_id,))
-                c.execute(
+                await c.execute(
                     "INSERT INTO history (word_id, correct) VALUES (%s, 0)",
                     (word_id,))
 
-            conn.commit()
+            await conn.commit()
 
     context.user_data['test_index'] += 1
     if context.user_data['test_index'] < len(context.user_data['test_words']):
@@ -395,13 +395,13 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("❌ База данных не подключена!")
         return
 
-    with db_pool.connection() as conn:
-        with conn.cursor() as c:
-            c.execute(
+    async with db_pool.connection() as conn:
+        async with conn.cursor() as c:
+            await c.execute(
                 "SELECT t.portuguese, t.russian, COALESCE(s.incorrect, 0) as errors "
                 "FROM thesaurus t LEFT JOIN stats s ON t.id = s.id "
                 "ORDER BY errors DESC LIMIT 10")
-            top_errors = c.fetchall()
+            top_errors = await c.fetchall()
 
     if not top_errors or all(errors == 0 for _, _, errors in top_errors):
         await update.message.reply_text(
@@ -419,17 +419,17 @@ async def memory(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("❌ База данных не подключена!")
         return
 
-    with db_pool.connection() as conn:
-        with conn.cursor() as c:
-            c.execute("SELECT t.portuguese, t.russian, t.id FROM thesaurus t")
-            words = c.fetchall()
+    async with db_pool.connection() as conn:
+        async with conn.cursor() as c:
+            await c.execute("SELECT t.portuguese, t.russian, t.id FROM thesaurus t")
+            words = await c.fetchall()
 
             response = "🧠 *Степень запоминания:*\n\n`Слово | Перевод | %`\n" + "-" * 40 + "\n"
             for portuguese, russian, word_id in words:
-                c.execute(
+                await c.execute(
                     "SELECT correct FROM history WHERE word_id = %s ORDER BY timestamp DESC LIMIT 5",
                     (word_id,))
-                last_5 = c.fetchall()
+                last_5 = await c.fetchall()
                 if not last_5:
                     percent = "N/A"
                 else:

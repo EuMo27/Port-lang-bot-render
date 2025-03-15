@@ -1,3 +1,4 @@
+from psycopg_pool import AsyncConnectionPool
 import random
 import os
 import asyncio
@@ -221,7 +222,7 @@ async def edit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         return ConversationHandler.END
 
     context.user_data['edit_id'] = word_id
-    context.user_data['old_portuguese'], context.user_data['old_russian'] = word
+    context.user_data['old_portuguese'], context.user_data['old_russian] = word
     await update.message.reply_text(
         f'✏️ Редактируем: *{word[0]} - {word[1]}*\nВведи новое слово на португальском (или нажми Enter, чтобы оставить *{word[0]}*):',
         parse_mode='Markdown')

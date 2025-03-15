@@ -462,8 +462,8 @@ async def main():
                 add_handler = ConversationHandler(
                     entry_points=[CommandHandler('add', add)],
                     states={
-                        PORTUGUESE: [MessageHandler(filters.Text & ~filters.COMMAND, get_portuguese)],
-                        RUSSIAN: [MessageHandler(filters.Text & ~filters.COMMAND, get_russian)],
+                        PORTUGUESE: [MessageHandler(filters.ALL & ~filters.COMMAND, get_portuguese)],
+                        RUSSIAN: [MessageHandler(filters.ALL & ~filters.COMMAND, get_russian)],
                     },
                     fallbacks=[CommandHandler('cancel', cancel)]
                 )
@@ -472,7 +472,7 @@ async def main():
                 bulk_handler = ConversationHandler(
                     entry_points=[CommandHandler('bulk_add', bulk_add)],
                     states={
-                        BULK_ADD: [MessageHandler(filters.Text & ~filters.COMMAND | filters.Document.ALL, process_bulk_add)]
+                        BULK_ADD: [MessageHandler(filters.ALL & ~filters.COMMAND | filters.Document.ALL, process_bulk_add)]
                     },
                     fallbacks=[CommandHandler('cancel', cancel)]
                 )
@@ -481,8 +481,8 @@ async def main():
                 edit_handler = ConversationHandler(
                     entry_points=[CommandHandler('edit', edit)],
                     states={
-                        EDIT_PORTUGUESE: [MessageHandler(filters.Text & ~filters.COMMAND, edit_portuguese)],
-                        EDIT_RUSSIAN: [MessageHandler(filters.Text & ~filters.COMMAND, edit_russian)],
+                        EDIT_PORTUGUESE: [MessageHandler(filters.ALL & ~filters.COMMAND, edit_portuguese)],
+                        EDIT_RUSSIAN: [MessageHandler(filters.ALL & ~filters.COMMAND, edit_russian)],
                     },
                     fallbacks=[CommandHandler('cancel', cancel)]
                 )
@@ -491,7 +491,7 @@ async def main():
                 test_handler = ConversationHandler(
                     entry_points=[CommandHandler('test', test)],
                     states={
-                        TEST_ANSWER: [MessageHandler(filters.Text & ~filters.COMMAND, check_answer)]
+                        TEST_ANSWER: [MessageHandler(filters.ALL & ~filters.COMMAND, check_answer)]
                     },
                     fallbacks=[CommandHandler('cancel', cancel)]
                 )

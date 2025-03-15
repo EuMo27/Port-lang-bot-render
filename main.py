@@ -1,4 +1,3 @@
-from psycopg_pool import AsyncConnectionPool
 import random
 import os
 import asyncio
@@ -9,28 +8,23 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Con
 TOKEN = os.getenv("TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Переменная для пула соединений (инициализируем позже)
-db_pool = None
-
 # Состояния для ConversationHandler
 PORTUGUESE, RUSSIAN, TEST_ANSWER, BULK_ADD, EDIT_PORTUGUESE, EDIT_RUSSIAN = range(6)
 
-# Инициализация базы данных
-async def init_db():
-    if db_pool:
-        async with db_pool.connection() as conn:
-            async with conn.cursor() as c:
-                await c.execute("DROP TABLE IF EXISTS stats CASCADE")
-                await c.execute('''CREATE TABLE IF NOT EXISTS thesaurus 
-                                 (id SERIAL PRIMARY KEY, portuguese TEXT, russian TEXT)''')
-                await c.execute('''CREATE TABLE IF NOT EXISTS stats 
-                                 (id INTEGER PRIMARY KEY, correct INTEGER DEFAULT 0, incorrect INTEGER DEFAULT 0, 
-                                  FOREIGN KEY(id) REFERENCES thesaurus(id))''')
-                await c.execute('''CREATE TABLE IF NOT EXISTS history 
-                                 (id SERIAL PRIMARY KEY, word_id INTEGER, correct INTEGER, 
-                                  timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                                  FOREIGN KEY(word_id) REFERENCES thesaurus(id))''')
-                await conn.commit()
+async def init_db(pool):
+    async with pool.connection() as conn:
+        async with conn.cursor() as c:
+            await c.execute("DROP TABLE IF EXISTS stats CASCADE")
+            await c.execute('''CREATE TABLE IF NOT EXISTS thesaurus 
+                             (id SERIAL PRIMARY KEY, portuguese TEXT, russian TEXT)''')
+            await c.execute('''CREATE TABLE IF NOT EXISTS stats 
+                             (id INTEGER PRIMARY KEY, correct INTEGER DEFAULT 0, incorrect INTEGER DEFAULT 0, 
+                              FOREIGN KEY(id) REFERENCES thesaurus(id))''')
+            await c.execute('''CREATE TABLE IF NOT EXISTS history 
+                             (id SERIAL PRIMARY KEY, word_id INTEGER, correct INTEGER, 
+                              timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                              FOREIGN KEY(word_id) REFERENCES thesaurus(id))''')
+            await conn.commit()
 
 # Обработчики команд
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -53,11 +47,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         parse_mode='Markdown')
 
 async def thesaurus(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not db_pool:
+    if not context.bot_data.get('db_pool'):
         await update.message.reply_text("❌ База данных не подключена!")
         return
 
-    async with db_pool.connection() as conn:
+    async with context.bot_data['db_pool'].connection() as conn:
         async with conn.cursor() as c:
             await c.execute("SELECT id, portuguese, russian FROM thesaurus")
             words = await c.fetchall()
@@ -82,14 +76,14 @@ async def get_portuguese(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     return RUSSIAN
 
 async def get_russian(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if not db_pool:
+    if not context.bot_data.get('db_pool'):
         await update.message.reply_text("❌ База данных не подключена!")
         return ConversationHandler.END
 
     russian = update.message.text
     portuguese = context.user_data['portuguese']
 
-    async with db_pool.connection() as conn:
+    async with context.bot_data['db_pool'].connection() as conn:
         async with conn.cursor() as c:
             await c.execute(
                 "INSERT INTO thesaurus (portuguese, russian) VALUES (%s, %s)",
@@ -108,14 +102,14 @@ async def bulk_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return BULK_ADD
 
 async def process_bulk_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if not db_pool:
+    if not context.bot_data.get('db_pool'):
         await update.message.reply_text("❌ База данных не подключена!")
         return ConversationHandler.END
 
     added = 0
     errors = 0
 
-    async with db_pool.connection() as conn:
+    async with context.bot_data['db_pool'].connection() as conn:
         async with conn.cursor() as c:
             try:
                 if update.message.document:
@@ -205,7 +199,7 @@ async def process_bulk_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     return ConversationHandler.END
 
 async def edit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if not db_pool:
+    if not context.bot_data.get('db_pool'):
         await update.message.reply_text("❌ База данных не подключена!")
         return ConversationHandler.END
 
@@ -215,7 +209,7 @@ async def edit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         return ConversationHandler.END
 
     word_id = context.args[0]
-    async with db_pool.connection() as conn:
+    async with context.bot_data['db_pool'].connection() as conn:
         async with conn.cursor() as c:
             await c.execute("SELECT portuguese, russian FROM thesaurus WHERE id = %s", (word_id,))
             word = await c.fetchone()
@@ -247,7 +241,7 @@ async def edit_russian(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     new_portuguese = context.user_data['new_portuguese']
     word_id = context.user_data['edit_id']
 
-    async with db_pool.connection() as conn:
+    async with context.bot_data['db_pool'].connection() as conn:
         async with conn.cursor() as c:
             await c.execute(
                 "UPDATE thesaurus SET portuguese = %s, russian = %s WHERE id = %s",
@@ -260,7 +254,7 @@ async def edit_russian(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     return ConversationHandler.END
 
 async def delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not db_pool:
+    if not context.bot_data.get('db_pool'):
         await update.message.reply_text("❌ База данных не подключена!")
         return
 
@@ -270,7 +264,7 @@ async def delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     word_id = context.args[0]
-    async with db_pool.connection() as conn:
+    async with context.bot_data['db_pool'].connection() as conn:
         async with conn.cursor() as c:
             await c.execute("SELECT portuguese, russian FROM thesaurus WHERE id = %s", (word_id,))
             word = await c.fetchone()
@@ -291,11 +285,11 @@ async def delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         parse_mode='Markdown')
 
 async def test(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if not db_pool:
+    if not context.bot_data.get('db_pool'):
         await update.message.reply_text("❌ База данных не подключена!")
         return ConversationHandler.END
 
-    async with db_pool.connection() as conn:
+    async with context.bot_data['db_pool'].connection() as conn:
         async with conn.cursor() as c:
             await c.execute(
                 "SELECT t.id, t.portuguese, t.russian, COALESCE(s.incorrect, 0) as errors FROM thesaurus t "
@@ -342,7 +336,7 @@ async def check_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     correct_answer = context.user_data['correct_answer']
     word_id = context.user_data['current_word_id']
 
-    async with db_pool.connection() as conn:
+    async with context.bot_data['db_pool'].connection() as conn:
         async with conn.cursor() as c:
             await c.execute(
                 "INSERT INTO stats (id) VALUES (%s) ON CONFLICT (id) DO NOTHING",
@@ -382,11 +376,11 @@ async def check_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         return ConversationHandler.END
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not db_pool:
+    if not context.bot_data.get('db_pool'):
         await update.message.reply_text("❌ База данных не подключена!")
         return
 
-    async with db_pool.connection() as conn:
+    async with context.bot_data['db_pool'].connection() as conn:
         async with conn.cursor() as c:
             await c.execute(
                 "SELECT t.portuguese, t.russian, COALESCE(s.incorrect, 0) as errors "
@@ -406,11 +400,11 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(response, parse_mode='Markdown')
 
 async def memory(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not db_pool:
+    if not context.bot_data.get('db_pool'):
         await update.message.reply_text("❌ База данных не подключена!")
         return
 
-    async with db_pool.connection() as conn:
+    async with context.bot_data['db_pool'].connection() as conn:
         async with conn.cursor() as c:
             await c.execute("SELECT t.portuguese, t.russian, t.id FROM thesaurus t")
             words = await c.fetchall()
@@ -442,79 +436,85 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return ConversationHandler.END
 
 async def main():
-    global db_pool  # Объявляем db_pool как глобальную переменную, чтобы изменить её
-
     if not TOKEN:
         print("Error: TOKEN is not set!")
         return
 
-    # Создаём пул соединений внутри асинхронной функции
+    # Создание пула как контекстного менеджера
     if DATABASE_URL:
         try:
-            db_pool = AsyncConnectionPool(DATABASE_URL, min_size=1, max_size=20)
-            print("Database pool created successfully!")
+            async with AsyncConnectionPool(DATABASE_URL, min_size=1, max_size=20) as pool:
+                context.bot_data['db_pool'] = pool
+                print("Database pool created successfully!")
+                await init_db(pool)
+                application = ApplicationBuilder().token(TOKEN).build()
+
+                application.add_handler(CommandHandler("start", start))
+                application.add_handler(CommandHandler("help", help_command))
+                application.add_handler(CommandHandler("thesaurus", thesaurus))
+                application.add_handler(CommandHandler("stats", stats))
+                application.add_handler(CommandHandler("memory", memory))
+                application.add_handler(CommandHandler("delete", delete))
+
+                add_handler = ConversationHandler(
+                    entry_points=[CommandHandler('add', add)],
+                    states={
+                        PORTUGUESE: [MessageHandler(filters.Text & ~filters.COMMAND, get_portuguese)],
+                        RUSSIAN: [MessageHandler(filters.Text & ~filters.COMMAND, get_russian)],
+                    },
+                    fallbacks=[CommandHandler('cancel', cancel)]
+                )
+                application.add_handler(add_handler)
+
+                bulk_handler = ConversationHandler(
+                    entry_points=[CommandHandler('bulk_add', bulk_add)],
+                    states={
+                        BULK_ADD: [MessageHandler(filters.Text & ~filters.COMMAND | filters.Document.ALL, process_bulk_add)]
+                    },
+                    fallbacks=[CommandHandler('cancel', cancel)]
+                )
+                application.add_handler(bulk_handler)
+
+                edit_handler = ConversationHandler(
+                    entry_points=[CommandHandler('edit', edit)],
+                    states={
+                        EDIT_PORTUGUESE: [MessageHandler(filters.Text & ~filters.COMMAND, edit_portuguese)],
+                        EDIT_RUSSIAN: [MessageHandler(filters.Text & ~filters.COMMAND, edit_russian)],
+                    },
+                    fallbacks=[CommandHandler('cancel', cancel)]
+                )
+                application.add_handler(edit_handler)
+
+                test_handler = ConversationHandler(
+                    entry_points=[CommandHandler('test', test)],
+                    states={
+                        TEST_ANSWER: [MessageHandler(filters.Text & ~filters.COMMAND, check_answer)]
+                    },
+                    fallbacks=[CommandHandler('cancel', cancel)]
+                )
+                application.add_handler(test_handler)
+
+                while True:
+                    try:
+                        await application.run_polling(allowed_updates=Update.ALL_TYPES)
+                    except Exception as e:
+                        print(f"Bot crashed with error: {e}, restarting...")
+                        await asyncio.sleep(5)
         except Exception as e:
             print(f"Failed to create database pool: {e}")
-            db_pool = None
     else:
         print("No DATABASE_URL provided, running without database.")
+        application = ApplicationBuilder().token(TOKEN).build()
 
-    if db_pool:
-        await init_db()
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(CommandHandler("help", help_command))
 
-    application = ApplicationBuilder().token(TOKEN).build()
-
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("thesaurus", thesaurus))
-    application.add_handler(CommandHandler("stats", stats))
-    application.add_handler(CommandHandler("memory", memory))
-    application.add_handler(CommandHandler("delete", delete))
-
-    add_handler = ConversationHandler(
-        entry_points=[CommandHandler('add', add)],
-        states={
-            PORTUGUESE: [MessageHandler(filters.Text & ~filters.Command, get_portuguese)],
-            RUSSIAN: [MessageHandler(filters.Text & ~filters.Command, get_russian)],
-        },
-        fallbacks=[CommandHandler('cancel', cancel)]
-    )
-    application.add_handler(add_handler)
-
-    bulk_handler = ConversationHandler(
-        entry_points=[CommandHandler('bulk_add', bulk_add)],
-        states={
-            BULK_ADD: [MessageHandler(filters.Text & ~filters.Command | filters.Document.ALL, process_bulk_add)]
-        },
-        fallbacks=[CommandHandler('cancel', cancel)]
-    )
-    application.add_handler(bulk_handler)
-
-    edit_handler = ConversationHandler(
-        entry_points=[CommandHandler('edit', edit)],
-        states={
-            EDIT_PORTUGUESE: [MessageHandler(filters.Text & ~filters.Command, edit_portuguese)],
-            EDIT_RUSSIAN: [MessageHandler(filters.Text & ~filters.Command, edit_russian)],
-        },
-        fallbacks=[CommandHandler('cancel', cancel)]
-    )
-    application.add_handler(edit_handler)
-
-    test_handler = ConversationHandler(
-        entry_points=[CommandHandler('test', test)],
-        states={
-            TEST_ANSWER: [MessageHandler(filters.Text & ~filters.Command, check_answer)]
-        },
-        fallbacks=[CommandHandler('cancel', cancel)]
-    )
-    application.add_handler(test_handler)
-
-    while True:
-        try:
-            await application.run_polling(allowed_updates=Update.ALL_TYPES)
-        except Exception as e:
-            print(f"Bot crashed with error: {e}, restarting...")
-            await asyncio.sleep(5)
+        while True:
+            try:
+                await application.run_polling(allowed_updates=Update.ALL_TYPES)
+            except Exception as e:
+                print(f"Bot crashed with error: {e}, restarting...")
+                await asyncio.sleep(5)
 
 if __name__ == '__main__':
     asyncio.run(main())

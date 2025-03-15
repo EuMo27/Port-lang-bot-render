@@ -441,88 +441,92 @@ async def main():
         print("Error: TOKEN is not set!")
         return
 
-    # Создаём пул соединений один раз и держим его открытым
-    db_pool = None
+    # Используем пул как контекстный менеджер
     if DATABASE_URL:
-        try:
-            db_pool = AsyncConnectionPool(DATABASE_URL, min_size=1, max_size=20)
-            await db_pool.open()  # Открываем пул соединений
+        async with AsyncConnectionPool(DATABASE_URL, min_size=1, max_size=20) as db_pool:
             print("Database pool created successfully!")
             await init_db(db_pool)
-        except Exception as e:
-            print(f"Failed to create database pool: {e}")
-            return
 
-    # Создаём приложение
-    application = ApplicationBuilder().token(TOKEN).build()
+            # Создаём приложение
+            application = ApplicationBuilder().token(TOKEN).build()
 
-    # Сохраняем пул в bot_data
-    if db_pool:
-        application.bot_data['db_pool'] = db_pool
+            # Сохраняем пул в bot_data
+            application.bot_data['db_pool'] = db_pool
 
-    # Добавляем обработчики
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
-    if db_pool:
-        application.add_handler(CommandHandler("thesaurus", thesaurus))
-        application.add_handler(CommandHandler("stats", stats))
-        application.add_handler(CommandHandler("memory", memory))
-        application.add_handler(CommandHandler("delete", delete))
+            # Добавляем обработчики
+            application.add_handler(CommandHandler("start", start))
+            application.add_handler(CommandHandler("help", help_command))
+            application.add_handler(CommandHandler("thesaurus", thesaurus))
+            application.add_handler(CommandHandler("stats", stats))
+            application.add_handler(CommandHandler("memory", memory))
+            application.add_handler(CommandHandler("delete", delete))
 
-        add_handler = ConversationHandler(
-            entry_points=[CommandHandler('add', add)],
-            states={
-                PORTUGUESE: [MessageHandler(filters.ALL & ~filters.COMMAND, get_portuguese)],
-                RUSSIAN: [MessageHandler(filters.ALL & ~filters.COMMAND, get_russian)],
-            },
-            fallbacks=[CommandHandler('cancel', cancel)]
-        )
-        application.add_handler(add_handler)
+            add_handler = ConversationHandler(
+                entry_points=[CommandHandler('add', add)],
+                states={
+                    PORTUGUESE: [MessageHandler(filters.ALL & ~filters.COMMAND, get_portuguese)],
+                    RUSSIAN: [MessageHandler(filters.ALL & ~filters.COMMAND, get_russian)],
+                },
+                fallbacks=[CommandHandler('cancel', cancel)]
+            )
+            application.add_handler(add_handler)
 
-        bulk_handler = ConversationHandler(
-            entry_points=[CommandHandler('bulk_add', bulk_add)],
-            states={
-                BULK_ADD: [MessageHandler(filters.ALL & ~filters.COMMAND | filters.Document.ALL, process_bulk_add)]
-            },
-            fallbacks=[CommandHandler('cancel', cancel)]
-        )
-        application.add_handler(bulk_handler)
+            bulk_handler = ConversationHandler(
+                entry_points=[CommandHandler('bulk_add', bulk_add)],
+                states={
+                    BULK_ADD: [MessageHandler(filters.ALL & ~filters.COMMAND | filters.Document.ALL, process_bulk_add)]
+                },
+                fallbacks=[CommandHandler('cancel', cancel)]
+            )
+            application.add_handler(bulk_handler)
 
-        edit_handler = ConversationHandler(
-            entry_points=[CommandHandler('edit', edit)],
-            states={
-                EDIT_PORTUGUESE: [MessageHandler(filters.ALL & ~filters.COMMAND, edit_portuguese)],
-                EDIT_RUSSIAN: [MessageHandler(filters.ALL & ~filters.COMMAND, edit_russian)],
-            },
-            fallbacks=[CommandHandler('cancel', cancel)]
-        )
-        application.add_handler(edit_handler)
+            edit_handler = ConversationHandler(
+                entry_points=[CommandHandler('edit', edit)],
+                states={
+                    EDIT_PORTUGUESE: [MessageHandler(filters.ALL & ~filters.COMMAND, edit_portuguese)],
+                    EDIT_RUSSIAN: [MessageHandler(filters.ALL & ~filters.COMMAND, edit_russian)],
+                },
+                fallbacks=[CommandHandler('cancel', cancel)]
+            )
+            application.add_handler(edit_handler)
 
-        test_handler = ConversationHandler(
-            entry_points=[CommandHandler('test', test)],
-            states={
-                TEST_ANSWER: [MessageHandler(filters.ALL & ~filters.COMMAND, check_answer)]
-            },
-            fallbacks=[CommandHandler('cancel', cancel)]
-        )
-        application.add_handler(test_handler)
+            test_handler = ConversationHandler(
+                entry_points=[CommandHandler('test', test)],
+                states={
+                    TEST_ANSWER: [MessageHandler(filters.ALL & ~filters.COMMAND, check_answer)]
+                },
+                fallbacks=[CommandHandler('cancel', cancel)]
+            )
+            application.add_handler(test_handler)
 
-    # Запускаем бота с корректным управлением жизненным циклом
-    while True:
-        try:
-            await application.initialize()  # Инициализируем приложение
-            await application.run_polling(allowed_updates=Update.ALL_TYPES)
-        except Exception as e:
-            print(f"Bot crashed with error: {e}, restarting...")
-            await application.shutdown()  # Завершаем приложение перед перезапуском
-            await asyncio.sleep(5)
-        finally:
-            # Закрываем приложение при завершении
-            await application.shutdown()
+            # Запускаем бота с корректным управлением жизненным циклом
+            while True:
+                try:
+                    await application.initialize()  # Инициализируем приложение
+                    await application.run_polling(allowed_updates=Update.ALL_TYPES)
+                except Exception as e:
+                    print(f"Bot crashed with error: {e}, restarting...")
+                    await application.shutdown()  # Завершаем приложение перед перезапуском
+                    await asyncio.sleep(5)
+                finally:
+                    await application.shutdown()  # Убеждаемся, что приложение завершено
 
-    # Закрываем пул соединений при завершении (этот код не будет достигнут в текущей реализации)
-    if db_pool:
-        await db_pool.close()
+    else:
+        print("No DATABASE_URL provided, running without database.")
+        application = ApplicationBuilder().token(TOKEN).build()
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(CommandHandler("help", help_command))
+
+        while True:
+            try:
+                await application.initialize()  # Инициализируем приложение
+                await application.run_polling(allowed_updates=Update.ALL_TYPES)
+            except Exception as e:
+                print(f"Bot crashed with error: {e}, restarting...")
+                await application.shutdown()  # Завершаем приложение перед перезапуском
+                await asyncio.sleep(5)
+            finally:
+                await application.shutdown()  # Убеждаемся, что приложение завершено
 
 if __name__ == '__main__':
     asyncio.run(main())

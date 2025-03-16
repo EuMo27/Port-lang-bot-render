@@ -1,5 +1,6 @@
 import os
 import asyncio
+from telegram import Update  # Добавляем импорт Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ConversationHandler, filters, ContextTypes
 from psycopg_pool import AsyncConnectionPool
 import random

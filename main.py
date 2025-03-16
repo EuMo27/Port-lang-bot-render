@@ -1,9 +1,8 @@
-from psycopg_pool import AsyncConnectionPool
-import random
 import os
 import asyncio
-from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ConversationHandler, filters, ContextTypes
+from psycopg_pool import AsyncConnectionPool
+import random
 
 # Получаем токен и URL базы данных из переменных окружения
 TOKEN = os.getenv("TOKEN")
@@ -503,18 +502,34 @@ async def main():
     db_pool = None
     if DATABASE_URL:
         try:
-            db_pool = AsyncConnectionPool(DATABASE_URL, min_size=1, max_size=20)
-            await db_pool.wait()  # Ожидаем, пока пул будет готов
-            print("Database pool created successfully!")
-            await init_db(db_pool)
+            async with AsyncConnectionPool(DATABASE_URL, min_size=1, max_size=20) as db_pool:
+                print("Database pool created successfully!")
+                await init_db(db_pool)
+
+                while True:
+                    # Создаём приложение
+                    application = await setup_application(db_pool)
+
+                    try:
+                        # Инициализируем приложение
+                        await application.initialize()
+                        # Запускаем polling
+                        await application.run_polling(allowed_updates=Update.ALL_TYPES)
+                    except Exception as e:
+                        print(f"Bot crashed with error: {e}, restarting...")
+                        await application.shutdown()
+                    else:
+                        await application.shutdown()
+                    finally:
+                        await asyncio.sleep(5)
+
         except Exception as e:
             print(f"Failed to create database pool: {e}")
-            return
-
-    try:
+    else:
+        print("No DATABASE_URL provided, running without database.")
         while True:
             # Создаём приложение
-            application = await setup_application(db_pool)
+            application = await setup_application()
 
             try:
                 # Инициализируем приложение
@@ -523,18 +538,11 @@ async def main():
                 await application.run_polling(allowed_updates=Update.ALL_TYPES)
             except Exception as e:
                 print(f"Bot crashed with error: {e}, restarting...")
-            finally:
-                # Всегда завершаем приложение
                 await application.shutdown()
-
-            # Ждём перед перезапуском
-            await asyncio.sleep(5)
-
-    finally:
-        # Закрываем пул соединений при завершении программы
-        if db_pool:
-            await db_pool.close()
-            print("Database pool closed.")
+            else:
+                await application.shutdown()
+            finally:
+                await asyncio.sleep(5)
 
 if __name__ == '__main__':
     asyncio.run(main())
